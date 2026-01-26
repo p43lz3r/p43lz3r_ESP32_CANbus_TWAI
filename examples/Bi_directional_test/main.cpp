@@ -4,7 +4,6 @@
 // Normal mode → sends ACKs to Pi cansend.
 
 #include <Arduino.h>
-
 #include "waveshare_can.h"
 
 WaveshareCan can(kBoard43b);  // kBoard43b = RX16 / TX15
