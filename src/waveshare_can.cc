@@ -1,4 +1,4 @@
-// Copyright 2026 Your Name / Project. All rights reserved.
+// Copyright 2026 by p43lz3r
 #include "waveshare_can.h"
 
 #include <esp_io_expander.hpp>
@@ -23,7 +23,6 @@ WaveshareCan::~WaveshareCan() {
 bool WaveshareCan::InitIoExpander(int scl_pin, int sda_pin, int addr) {
   if (expander_initialized_) return true;
 
-  // Google Style: Use std::unique_ptr for ownership
   expander_ = std::unique_ptr<esp_expander::CH422G>(
       new esp_expander::CH422G(scl_pin, sda_pin, addr));
 
@@ -50,7 +49,6 @@ bool WaveshareCan::Begin(twai_timing_config_t speed_config) {
 
   timing_config_ = speed_config;
 
-  // Use static_cast for type safety
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(
       static_cast<gpio_num_t>(tx_pin_), static_cast<gpio_num_t>(rx_pin_),
       listen_only_ ? TWAI_MODE_LISTEN_ONLY : TWAI_MODE_NORMAL);

@@ -1,4 +1,4 @@
-// Copyright 2026 Your Name / Project. All rights reserved.
+// Copyright 2026 p43lz3r
 // Bidirectional test: RX all messages + TX test frame every 1s.
 // For Waveshare ESP32-S3-Touch-LCD-4.3B (pins auto-set to 16/15).
 // Normal mode → sends ACKs to Pi cansend.
@@ -9,7 +9,7 @@
 
 WaveshareCan can(kBoard43b);  // kBoard43b = RX16 / TX15
 
-// Transmit timing & counter - Google style uses camelCase for globals.
+// Transmit timing & counter
 unsigned long last_tx = 0;
 constexpr unsigned long kTxInterval = 1000;  // 1 second
 uint32_t tx_count = 0;

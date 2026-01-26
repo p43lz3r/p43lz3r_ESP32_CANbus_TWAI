@@ -1,4 +1,4 @@
-// Copyright 2026 Your Name / Project. All rights reserved.
+// Copyright 2026 p43lz3r
 #ifndef PROJECT_WAVESHARE_CAN_H_
 #define PROJECT_WAVESHARE_CAN_H_
 
@@ -28,7 +28,6 @@ constexpr uint8_t kExpIoLcdBl = 2;   // EXIO2 - Backlight (DISP)
 constexpr uint8_t kExpIoSdCs = 4;    // EXIO4 - SD card CS (active low)
 
 // CAN speed presets
-// Google Style prefers constexpr over #define for constants.
 constexpr twai_timing_config_t kCan5Kbps = TWAI_TIMING_CONFIG_5KBITS();
 constexpr twai_timing_config_t kCan10Kbps = TWAI_TIMING_CONFIG_10KBITS();
 constexpr twai_timing_config_t kCan20Kbps = TWAI_TIMING_CONFIG_20KBITS();
@@ -45,7 +44,6 @@ class WaveshareCan {
   WaveshareCan(BoardType board = kBoard43b, int rx_pin = -1, int tx_pin = -1);
   ~WaveshareCan();
 
-  // Disallow copy and assignment (Standard Google safety practice)
   WaveshareCan(const WaveshareCan&) = delete;
   WaveshareCan& operator=(const WaveshareCan&) = delete;
 
