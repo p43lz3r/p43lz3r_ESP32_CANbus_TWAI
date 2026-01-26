@@ -1,16 +1,12 @@
 // Copyright 2026 by p43lz3r
 #include "waveshare_can.h"
 
-#include <esp_io_expander.hpp>
-
 WaveshareCan::WaveshareCan(BoardType board, int rx_pin, int tx_pin)
     : board_type_(board),
       rx_pin_(rx_pin >= 0 ? rx_pin : (board == kBoard43b ? 16 : 19)),
       tx_pin_(tx_pin >= 0 ? tx_pin : (board == kBoard43b ? 15 : 20)),
       initialized_(false),
-      expander_initialized_(false),
       listen_only_(false),
-      expander_(nullptr),
       alert_callback_(nullptr) {
   timing_config_ = kCan500Kbps;
   filter_config_ = TWAI_FILTER_CONFIG_ACCEPT_ALL();
@@ -18,30 +14,6 @@ WaveshareCan::WaveshareCan(BoardType board, int rx_pin, int tx_pin)
 
 WaveshareCan::~WaveshareCan() {
   End();
-}
-
-bool WaveshareCan::InitIoExpander(int scl_pin, int sda_pin, int addr) {
-  if (expander_initialized_) return true;
-
-  expander_ = std::unique_ptr<esp_expander::CH422G>(
-      new esp_expander::CH422G(scl_pin, sda_pin, addr));
-
-  if (!expander_ || !expander_->init() || !expander_->begin()) {
-    Serial.println("IO Expander init failed - continuing without");
-    expander_.reset();
-    return false;
-  }
-
-  // Basic safe setup
-  expander_->enableAllIO_Output();
-
-  uint8_t high_pins = kExpIoTpRst | kExpIoSdCs;
-  expander_->multiDigitalWrite(high_pins, HIGH);
-  expander_->digitalWrite(kExpIoLcdBl, LOW);
-
-  expander_initialized_ = true;
-  Serial.println("CH422G IO Expander initialized (optional)");
-  return true;
 }
 
 bool WaveshareCan::Begin(twai_timing_config_t speed_config) {
