@@ -1,0 +1,18 @@
+{
+  "name": "p43lz3r_ESP32_TWAI_CANbus",
+  "version": "1.0.0",
+  "description": "Driver for Waveshare ESP32S3 CAN Boards",
+  "keywords": "can, twai, esp32, waveshare",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/p43lz3r/p43lz3r_ESP32_TWAI_CANbus.git"
+  },
+  "authors": [
+    {
+      "name": "p43lz3r",
+      "maintainer": true
+    }
+  ],
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}
