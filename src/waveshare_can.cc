@@ -142,14 +142,23 @@ int WaveshareCan::ReceiveMessage(uint32_t* id, bool* extended, uint8_t* data,
   return message.data_length_code;
 }
 
-void WaveshareCan::Filter(uint32_t id, uint32_t mask) {
-  if (!initialized_) return;
+bool WaveshareCan::Filter(uint32_t id, uint32_t mask, bool extended) {
+  if (!initialized_) return false;
 
   End();
-  filter_config_.acceptance_code = (id << 3);
-  filter_config_.acceptance_mask = (~mask) << 3;
+  
+  if (extended) {
+    // Extended 29-bit IDs: use bits as-is
+    filter_config_.acceptance_code = (id << 3);
+    filter_config_.acceptance_mask = ~(mask << 3);
+  } else {
+    // Standard 11-bit IDs: shift to upper bits of 29-bit field
+    filter_config_.acceptance_code = (id << 21);
+    filter_config_.acceptance_mask = ~(mask << 21);
+  }
+  
   filter_config_.single_filter = true;
-  Begin(timing_config_);
+  return Begin(timing_config_);
 }
 
 bool WaveshareCan::GetStatus(twai_status_info_t* status) {
@@ -278,8 +287,7 @@ void WaveshareCan::AlertTask() {
     esp_err_t err = twai_read_alerts(&alerts, pdMS_TO_TICKS(100));
     
     if (err == ESP_OK && alerts != 0) {
-      HandleAlerts(alerts);
-      
+      // Only call user callback - NO HandleAlerts (has Serial.printf)
       if (alert_callback_) {
         alert_callback_(alerts);
       }
@@ -446,7 +454,7 @@ int WaveshareCan::ReceiveFromQueue(uint32_t* id, bool* extended, uint8_t* data,
 }
 
 WaveshareCan::TaskStats WaveshareCan::GetTaskStats() const {
-  TaskStats stats = {0, 0, kRxTaskStackSize, kAlertTaskStackSize};
+  TaskStats stats = {0, 0, kRxTaskStackSize * 4, kAlertTaskStackSize * 4};  // Convert words to bytes
   
   if (rx_task_handle_ != nullptr) {
     stats.rx_stack_free = uxTaskGetStackHighWaterMark(rx_task_handle_);

@@ -53,7 +53,7 @@ class WaveshareCan {
                      uint8_t* length, bool* rtr = nullptr);
 
   // Set acceptance filter (re-initializes driver)
-  void Filter(uint32_t id, uint32_t mask = 0);
+  bool Filter(uint32_t id, uint32_t mask = 0, bool extended = false);
 
   // Get TWAI status
   bool GetStatus(twai_status_info_t* status);
@@ -128,7 +128,7 @@ class WaveshareCan {
 
   // Task stack sizes (in WORDS for xTaskCreate)
   static constexpr uint32_t kRxTaskStackSize = 2048;     // 2048 words = 8KB
-  static constexpr uint32_t kAlertTaskStackSize = 1024;  // 1024 words = 4KB
+  static constexpr uint32_t kAlertTaskStackSize = 2048;  // 2048 words = 8KB (increased from 4KB)
 
   BoardType board_type_;
   int rx_pin_;
