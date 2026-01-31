@@ -264,10 +264,18 @@ void WaveshareCan::DisableAlertInterrupt() {
 
   alert_interrupt_enabled_ = false;
 
+  // Wait for task to self-delete
   if (alert_task_handle_ != nullptr) {
-    vTaskDelay(pdMS_TO_TICKS(50));  // Let task exit loop
-    vTaskDelete(alert_task_handle_);
-    alert_task_handle_ = nullptr;
+    uint32_t wait_count = 0;
+    while (alert_task_handle_ != nullptr && wait_count < 50) {  // Max 500ms
+      vTaskDelay(pdMS_TO_TICKS(10));
+      wait_count++;
+    }
+    
+    if (alert_task_handle_ != nullptr) {
+      Serial.println("WARNING: Alert task did not exit cleanly");
+      alert_task_handle_ = nullptr;
+    }
   }
 
   Serial.println("Alert interrupt disabled");
@@ -301,6 +309,10 @@ void WaveshareCan::AlertTask() {
       (void)free_stack;  // Suppress unused warning
     }
   }
+  
+  // Task exits cleanly - self-delete
+  alert_task_handle_ = nullptr;
+  vTaskDelete(NULL);
 }
 
 void WaveshareCan::OnReceive(void (*callback)(const twai_message_t& msg)) {
@@ -359,10 +371,19 @@ void WaveshareCan::DisableRxInterrupt() {
 
   rx_interrupt_enabled_ = false;
 
+  // Wait for task to self-delete (checks flag every 100ms + processing time)
   if (rx_task_handle_ != nullptr) {
-    vTaskDelay(pdMS_TO_TICKS(50));  // Let task exit loop
-    vTaskDelete(rx_task_handle_);
-    rx_task_handle_ = nullptr;
+    // Task will see flag change and self-delete within ~200ms
+    uint32_t wait_count = 0;
+    while (rx_task_handle_ != nullptr && wait_count < 50) {  // Max 500ms
+      vTaskDelay(pdMS_TO_TICKS(10));
+      wait_count++;
+    }
+    
+    if (rx_task_handle_ != nullptr) {
+      Serial.println("WARNING: RX task did not exit cleanly");
+      rx_task_handle_ = nullptr;
+    }
   }
 
   if (rx_queue_ != nullptr) {
@@ -424,7 +445,9 @@ void WaveshareCan::RxTask() {
     }
   }
 
-  // Task exits cleanly (no Serial)
+  // Task exits cleanly - self-delete
+  rx_task_handle_ = nullptr;
+  vTaskDelete(NULL);
 }
 
 int WaveshareCan::QueuedMessages() {
