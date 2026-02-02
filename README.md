@@ -1,65 +1,85 @@
 # WaveshareCAN Library for ESP32-S3
 
-A CAN bus library for ESP32-S3 Waveshare boards. Built for reliability, designed for real hardware.
+A CAN bus library for ESP32-S3 Waveshare boards. Built on ESP-IDF TWAI driver with FreeRTOS task management.
 
-## Hardware the library was successfully tested with
+Version: 2.2.0  
+Date: 02.02.2026  
+Copyright: 2026 p43lz3r
 
-- **ESP32-S3-Touch-LCD-4.3B** (default: RX=GPIO16, TX=GPIO15)
-- **ESP32-S3-Touch-LCD-7.0B** (default: RX=GPIO19, TX=GPIO20)
+## Hardware Compatibility
 
-Custom pins? No problem - configure them in the constructor.
+Tested and working:
+- ESP32-S3-Touch-LCD-4.3B (RX=GPIO16, TX=GPIO15)
+
+Expected to work (pin defaults configured):
+- ESP32-S3-Touch-LCD-7 (RX=GPIO19, TX=GPIO20)
+
+Custom GPIO pins supported via constructor arguments.
 
 ## Features
 
-### Core Functionality
-- **Standard (11-bit) and Extended (29-bit) CAN IDs** - Full support, properly implemented
-- **Polling and Interrupt Modes** - Your choice. Polling for simple stuff, interrupts for performance
-- **Listen-Only Mode** - Monitor the bus without ACKing. Perfect for sniffing
-- **Acceptance Filters** - Hardware filtering by ID. Don't waste CPU on messages you don't care about
-- **RTR Frame Support** - Remote transmission requests, because sometimes you need them
+### Core CAN Functionality
+Tested and working:
+- Standard 11-bit CAN identifiers (send/receive verified)
+- Polling and interrupt-driven reception modes
+- Hardware acceptance filters
+- Automatic bus-off recovery
 
-### Production-Ready Features
-- **Thread-Safe Operations** - FreeRTOS tasks, mutexes, the works. No race conditions
-- **Background Message Buffering** - 16-deep queue so you don't lose messages during processing
-- **Burst Handling** - Drains multiple messages per interrupt. Tested with 50+ message bursts
-- **Automatic Bus-Off Recovery** - Hardware error? Library handles it. Back online automatically
-- **Drop Counters** - Know exactly how many messages you missed and why
-- **Stack Monitoring** - Real-time task health. Know before things break
-- **Clean Shutdown** - Tasks exit gracefully. No orphaned resources, no corruption
+Implemented but not extensively tested:
+- Extended 29-bit CAN identifiers
+- Listen-only mode
+- Remote Transmission Request (RTR) frames
 
-### Monitoring & Diagnostics
-- **Alert System** - Bus errors, queue full, TX failures - you know immediately
-- **Status Reporting** - Error counters, queue depth, bus state - complete visibility
-- **Task Statistics** - Stack usage per task. Catch issues before they become crashes
+### Software Message Filtering (v2.2.0)
+- Runtime configurable without bus restart
+- Two modes: Monitoring (accept all) and Specific (filter by ID)
+- Up to 5 configurable CAN IDs
+- O(n) filter check where n <= 5 (negligible CPU impact)
+- Integrates with configuration manager for persistent settings
+
+### Production Features
+- Thread-safe FreeRTOS task management
+- 16-message deep queue for burst handling
+- Drop counters and statistics
+- Stack overflow monitoring
+- Clean task shutdown
 
 ## Installation
 
-1. Copy `waveshare_can.h` and `waveshare_can.cc` to your Arduino libraries folder
-2. Include in your sketch: `#include "waveshare_can.h"`
-3. Done
+Copy library files to your project:
+```
+project/
+├── src/
+│   ├── waveshare_can.h
+│   ├── waveshare_can.cpp
+│   ├── can_config_manager.h        (optional)
+│   └── can_config_manager.cpp      (optional)
+└── tools/
+    └── can_config.py               (optional)
+```
 
-## Quick Start
+For PlatformIO, add ArduinoJson if using configuration manager:
+```ini
+lib_deps = 
+    bblanchon/ArduinoJson@^7.0.0
+```
 
-### Basic Example - Polling Mode
+## Basic Usage
+
+### Polling Mode
 
 ```cpp
 #include "waveshare_can.h"
 
-WaveshareCan can(kBoard43b);  // 4.3" board
+WaveshareCan can(kBoard43b);
 
 void setup() {
   Serial.begin(115200);
-  
-  if (!can.Begin(kCan500Kbps)) {
-    Serial.println("CAN init failed!");
-    while(1);
-  }
-  
-  Serial.println("CAN running at 500 kbps");
+  can.Begin(kCan500Kbps);
 }
 
 void loop() {
-  // Send
+  // Transmit
   uint8_t data[] = {0x01, 0x02, 0x03, 0x04};
   can.SendMessage(0x123, data, 4);
   
@@ -67,17 +87,14 @@ void loop() {
   if (can.Available() > 0) {
     uint32_t id;
     uint8_t rxData[8], len;
-    
-    if (can.ReceiveMessage(&id, nullptr, rxData, &len) >= 0) {
-      Serial.printf("RX: ID=0x%X, Len=%d\n", id, len);
-    }
+    can.ReceiveMessage(&id, nullptr, rxData, &len);
   }
   
   delay(100);
 }
 ```
 
-### Interrupt Mode - For Performance
+### Interrupt Mode
 
 ```cpp
 #include "waveshare_can.h"
@@ -86,7 +103,7 @@ WaveshareCan can(kBoard43b);
 volatile uint32_t msgCount = 0;
 
 void onMessage(const twai_message_t& msg) {
-  msgCount++;  // Keep it fast - no Serial.print here!
+  msgCount++;  // Keep callback fast
 }
 
 void setup() {
@@ -100,267 +117,220 @@ void loop() {
   while (can.QueuedMessages() > 0) {
     uint32_t id;
     uint8_t data[8], len;
-    
     can.ReceiveFromQueue(&id, nullptr, data, &len);
-    Serial.printf("ID=0x%X\n", id);
+    Serial.printf("ID: 0x%X\n", id);
   }
-  
   delay(10);
 }
 ```
+
+### Software Filtering
+
+```cpp
+#include "waveshare_can.h"
+
+WaveshareCan can(kBoard43b);
+
+void setup() {
+  can.Begin(kCan500Kbps);
+  
+  // Accept only specific IDs
+  uint32_t acceptedIds[] = {0x100, 0x200, 0x300};
+  can.SetAcceptedIds(acceptedIds, 3, false);
+  can.SetFilterMode(kFilterSpecific);
+  
+  can.EnableRxInterrupt(onMessage);
+}
+```
+
+## Configuration System
+
+Optional runtime configuration via Serial interface with NVS persistence.
+
+### Python Tool
+
+Upload configuration without reflashing firmware:
+
+```bash
+# Monitor mode - accept all IDs
+python can_config.py --port /dev/ttyUSB0 --mode monitoring
+
+# Specific mode - filter by IDs
+python can_config.py --port /dev/ttyUSB0 --mode specific --ids 0x100 0x200 0x300
+
+# Extended 29-bit IDs
+python can_config.py --port /dev/ttyUSB0 --mode specific --ids 0x12345678 --extended
+```
+
+### Integration Example
+
+```cpp
+#include "waveshare_can.h"
+#include "can_config_manager.h"
+
+WaveshareCan can(kBoard43b);
+CanConfigManager config;
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Load saved configuration
+  config.LoadFromNVS();
+  
+  // Wait 15 seconds for new configuration via Serial
+  config.WaitForConfig(15000);
+  
+  // Start CAN and apply filters
+  can.Begin(kCan500Kbps);
+  config.ApplyToCanBus(&can);
+  
+  can.EnableRxInterrupt(onMessage);
+}
+```
+
+Configuration persists across power cycles in ESP32 NVS flash.
 
 ## API Reference
 
 ### Initialization
 
-```cpp
-WaveshareCan can(BoardType board = kBoard43b, int rx_pin = -1, int tx_pin = -1);
-```
-Create instance. Custom pins override board defaults.
+**WaveshareCan(BoardType board, int rx_pin, int tx_pin)**  
+Create instance. Use -1 for default pins.
 
-```cpp
-bool Begin(twai_timing_config_t speed = kCan500Kbps);
-```
-Start CAN. Available speeds: 5K to 1M bps. Returns false if hardware init fails.
+**bool Begin(twai_timing_config_t speed)**  
+Initialize CAN bus. Available speeds: kCan5Kbps through kCan1000Kbps.  
+Returns false on hardware failure.
 
-```cpp
-void End();
-```
-Stop and cleanup. Disables interrupts, uninstalls driver. Safe to call anytime.
+**void End()**  
+Stop CAN bus and release resources.
 
-### Transmit
+### Transmission
 
-```cpp
-bool SendMessage(uint32_t id, uint8_t* data, uint8_t length);
-```
-Send standard ID message. Returns false if TX buffer full or in listen-only mode.
+**bool SendMessage(uint32_t id, uint8_t\* data, uint8_t length)**  
+Send standard 11-bit ID message.
 
-```cpp
-bool SendMessage(uint32_t id, bool extended, uint8_t* data, uint8_t length, bool rtr = false);
-```
-Full control: extended IDs, RTR frames. Use this for 29-bit IDs.
+**bool SendMessage(uint32_t id, bool extended, uint8_t\* data, uint8_t length, bool rtr)**  
+Full control version. Set extended=true for 29-bit IDs.
 
-### Receive - Polling
+### Reception - Polling
 
-```cpp
-int Available();
-```
-How many messages waiting in hardware queue. Returns 0 if none.
+**int Available()**  
+Number of messages in hardware queue.
 
-```cpp
-int ReceiveMessage(uint32_t* id, bool* extended, uint8_t* data, uint8_t* length, bool* rtr = nullptr);
-```
-Non-blocking receive. Returns bytes received or -1 if queue empty.
+**int ReceiveMessage(uint32_t\* id, bool\* extended, uint8_t\* data, uint8_t\* length, bool\* rtr)**  
+Non-blocking receive. Returns bytes received or -1 if empty.
 
-### Receive - Interrupt Mode
+### Reception - Interrupt
 
-```cpp
-bool EnableRxInterrupt(void (*callback)(const twai_message_t&) = nullptr);
-```
-Start background RX task. Messages buffered in queue, callback fires on each message.
+**bool EnableRxInterrupt(void (\*callback)(const twai_message_t&))**  
+Start background task. Callback fires on each message.
 
-**Callback Rules:**
-- Executes in FreeRTOS task context
-- Keep under 1ms
-- NO Serial.print, NO delays, NO blocking
-- Set flags, increment counters, toggle GPIOs only
-- Complex processing? Use ReceiveFromQueue() in main loop
+Callback constraints:
+- Execution time under 1ms
+- No Serial.print, delay, or blocking calls
+- No memory allocation
+- Use only ISR-safe FreeRTOS primitives
 
-```cpp
-void OnReceive(void (*callback)(const twai_message_t&));
-```
-Change callback during runtime. Pass nullptr to disable callback (messages still queued).
+For complex processing, use ReceiveFromQueue() in main loop.
 
-```cpp
-void DisableRxInterrupt();
-```
-Stop RX task. Queue deleted, messages lost. Clean shutdown guaranteed.
+**void DisableRxInterrupt()**  
+Stop background task and delete queue.
 
-```cpp
-int QueuedMessages();
-```
-Messages waiting in interrupt queue (16 max). Check before ReceiveFromQueue().
+**int QueuedMessages()**  
+Messages buffered in interrupt queue (0-16).
 
-```cpp
-int ReceiveFromQueue(uint32_t* id, bool* extended, uint8_t* data, uint8_t* length, bool* rtr = nullptr);
-```
-Non-blocking queue read. Returns -1 if empty. Use in main loop for heavy processing.
+**int ReceiveFromQueue(uint32_t\* id, bool\* extended, uint8_t\* data, uint8_t\* length, bool\* rtr)**  
+Non-blocking queue read. Returns -1 if empty.
 
-### Filters
+### Filtering
 
-```cpp
-bool Filter(uint32_t id, uint32_t mask = 0, bool extended = false);
-```
-Hardware acceptance filter. Re-initializes driver.
+**void SetFilterMode(FilterMode mode)**  
+Set kFilterMonitoring (accept all) or kFilterSpecific (filter by ID).
 
-Examples:
-- `Filter(0x200, 0x7FF, false)` - Accept only standard ID 0x200
-- `Filter(0x100, 0x700, false)` - Accept 0x100-0x1FF (mask lower 8 bits)
-- `Filter(0x12345678, 0x1FFFFFFF, true)` - Accept only extended 0x12345678
-- `Filter(0, 0, false)` - Accept all
+**void SetAcceptedIds(const uint32_t\* ids, uint8_t count, bool extended)**  
+Configure up to 5 accepted IDs for specific mode.
+
+**bool Filter(uint32_t id, uint32_t mask, bool extended)**  
+Hardware acceptance filter. Requires bus restart. For runtime filtering without restart, use SetAcceptedIds().
+
+### Monitoring
+
+**bool GetStatus(twai_status_info_t\* status)**  
+Get TWAI driver status including error counters and queue depths.
+
+**uint32_t GetDroppedRxCount()**  
+Messages lost due to queue overflow.
+
+**uint32_t GetTxFailedCount()**  
+Failed transmissions.
+
+**TaskStats GetTaskStats()**  
+Stack usage for interrupt tasks. Monitor for overflow (free should stay above 512 words).
+
+**void ResetCounters()**  
+Clear drop and failure counters.
 
 ### Alerts
 
-```cpp
-bool ProcessAlerts(uint32_t* alerts_triggered = nullptr);
-```
-Check and handle CAN alerts. Call in loop for polling mode. Returns true if alerts fired.
+**void OnAlert(void (\*callback)(uint32_t))**  
+Register callback for CAN alerts.
 
-```cpp
-void OnAlert(void (*callback)(uint32_t));
-```
-Register alert callback. Fires on bus errors, queue full, TX failures.
+**bool EnableAlertInterrupt(void (\*callback)(uint32_t))**  
+Background alert monitoring. Same callback constraints as RX interrupt.
 
-```cpp
-bool EnableAlertInterrupt(void (*callback)(uint32_t) = nullptr);
-```
-Background alert handling. Same callback rules as RX interrupt.
-
-```cpp
-void DisableAlertInterrupt();
-```
-Stop alert task.
-
-Alert flags (bitwise OR):
-- `TWAI_ALERT_BUS_OFF` - Too many errors, bus disabled
-- `TWAI_ALERT_BUS_RECOVERED` - Recovered from bus-off
-- `TWAI_ALERT_ERR_PASS` - Error passive (>127 errors)
-- `TWAI_ALERT_BUS_ERROR` - Bus error detected
-- `TWAI_ALERT_RX_QUEUE_FULL` - Hardware queue overflow
-- `TWAI_ALERT_TX_FAILED` - Transmission failed
-
-### Status & Monitoring
-
-```cpp
-bool GetStatus(twai_status_info_t* status);
-```
-Complete TWAI driver status. State, error counters, queue depths.
-
-```cpp
-bool SetListenOnly(bool listen_only);
-```
-Toggle listen-only mode. Re-initializes driver.
-
-```cpp
-TaskStats GetTaskStats() const;
-```
-Stack usage for RX and Alert tasks. Monitor for stack overflow.
-
-```cpp
-uint32_t GetDroppedRxCount() const;
-```
-Messages lost due to queue full. Reset with ResetCounters().
-
-```cpp
-uint32_t GetTxFailedCount() const;
-```
-Failed transmissions. Usually means no bus partner or bus-off.
-
-```cpp
-void ResetCounters();
-```
-Clear drop and TX fail counters.
-
-## Advanced Usage
-
-### Custom Pins
-
-```cpp
-WaveshareCan can(kBoard43b, 10, 11);  // Custom RX=10, TX=11
-```
-
-### Extended IDs with Filters
-
-```cpp
-// Accept only extended ID 0x12345000 to 0x123450FF
-can.Filter(0x12345000, 0x1FFFFF00, true);
-```
-
-### Production Monitoring
-
-```cpp
-void loop() {
-  // Check for dropped messages
-  if (can.GetDroppedRxCount() > 0) {
-    Serial.printf("WARNING: %lu messages dropped!\n", can.GetDroppedRxCount());
-    can.ResetCounters();
-  }
-  
-  // Monitor stack health
-  WaveshareCan::TaskStats stats = can.GetTaskStats();
-  if (stats.rx_stack_free < 1024) {  // Less than 1KB free
-    Serial.println("WARNING: RX task stack running low!");
-  }
-}
-```
-
-### Bus Error Handling
-
-```cpp
-void onAlert(uint32_t alerts) {
-  if (alerts & TWAI_ALERT_BUS_OFF) {
-    // Bus-off detected - library automatically attempts recovery
-    Serial.println("Bus-off! Waiting for recovery...");
-  }
-  
-  if (alerts & TWAI_ALERT_BUS_RECOVERED) {
-    Serial.println("Bus recovered!");
-  }
-}
-
-void setup() {
-  can.Begin(kCan500Kbps);
-  can.EnableAlertInterrupt(onAlert);
-}
-```
+Alert flags include: TWAI_ALERT_BUS_OFF, TWAI_ALERT_ERR_PASS, TWAI_ALERT_RX_QUEUE_FULL, TWAI_ALERT_TX_FAILED.
 
 ## Technical Details
 
 ### Architecture
-- Built on ESP-IDF TWAI driver (Two-Wire Automotive Interface)
-- FreeRTOS tasks for interrupt handlers (8KB RX stack, 8KB Alert stack)
-- Thread-safe with proper task synchronization
-- Clean shutdown via task self-deletion pattern
+- ESP-IDF TWAI peripheral driver
+- FreeRTOS tasks: RX (priority 5, 8KB stack), Alert (priority 4, 8KB stack)
+- 16-message queue (twai_message_t = 13 bytes each)
+- Hardware RX queue: 32 messages
 
 ### Memory Usage
-- ~2KB RAM baseline
-- +8KB per interrupt task when enabled
-- 16-message queue buffer (16 × sizeof(twai_message_t))
+Measured:
+- Per interrupt task: 8KB stack allocation
+- Queue buffer: 208 bytes (16 messages)
+- Software filter: 24 bytes (5 IDs + metadata)
+
+Note: Baseline RAM usage not measured.
 
 ### Performance
-- Interrupt latency: <100μs
-- Burst handling: 50+ messages without loss
-- Background processing: RX task priority 5, Alert task priority 4
+Tested and verified:
+- Burst capacity: 50+ messages without loss at 500 kbps
+- Zero dropped messages in stress test (100 messages)
+- Software filter: O(n) where n <= 5
 
 ### Error Recovery
-- Automatic bus-off recovery via `twai_initiate_recovery()`
-- Error passive detection and reporting
-- TX retry on NACK (hardware handles retransmission)
+- Automatic bus-off recovery via twai_initiate_recovery()
+- Stack overflow detection via uxTaskGetStackHighWaterMark()
+- Clean task shutdown with self-delete pattern
 
 ## Troubleshooting
 
-**"Stack canary watchpoint triggered"**
-- Increase task stack size in header (currently 8KB per task)
-- Check callback complexity - keep under 1ms
+**Stack canary watchpoint triggered**  
+Increase task stack size in header constants (currently 2048 words = 8KB).
 
-**Messages dropped (GetDroppedRxCount > 0)**
-- Process queue faster in main loop
-- Reduce message rate
-- Enable RX interrupt if using polling
+**Messages dropped (GetDroppedRxCount > 0)**  
+Process queue faster or reduce message rate. Enable interrupt mode if using polling.
 
-**TX fails continuously**
-- Check physical connections (CANH, CANL, GND)
-- Verify bus termination (120Ω at each end)
-- Confirm bus partner is ACKing
-- Check bitrate matches network
+**TX continuously fails**  
+Check physical layer: CANH, CANL, GND connections and 120 ohm termination at both ends. Verify bus partner is acknowledging. Confirm bitrate matches network.
 
-**Bus-off state**
-- Too many errors (TX error counter > 255)
-- Usually physical layer issue
-- Library auto-recovers, but fix root cause
+**Bus-off state**  
+TX error counter exceeded 255. Usually indicates physical layer issue. Library auto-recovers but fix root cause.
+
+**Configuration not persisting**  
+Verify NVS partition in ESP32 flash. Check for sufficient free space. Use config.ClearNVS() to reset if corrupted.
 
 ## License
 
+MIT License  
 Copyright 2026 p43lz3r
 
-Released under MIT License.
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
