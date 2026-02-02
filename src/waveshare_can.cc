@@ -1,6 +1,9 @@
-// Copyright 2026 by p43lz3r
-#include "waveshare_can.h"
+// WaveshareCAN Library for ESP32-S3 - Implementation
+// Version: 2.2.0
+// Date: 02.02.2026 19:00
+// Copyright 2026 p43lz3r
 
+#include "waveshare_can.h"
 
 WaveshareCan::WaveshareCan(BoardType board, int rx_pin, int tx_pin)
     : board_type_(board),
@@ -16,10 +19,18 @@ WaveshareCan::WaveshareCan(BoardType board, int rx_pin, int tx_pin)
       alert_task_handle_(nullptr),
       rx_task_handle_(nullptr),
       rx_queue_(nullptr),
+      filter_mode_(kFilterMonitoring),
+      accepted_id_count_(0),
+      extended_filter_(false),
       rx_dropped_count_(0),
       tx_failed_count_(0) {
   timing_config_ = kCan500Kbps;
   filter_config_ = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+  
+  // Initialize accepted IDs array to zero
+  for (uint8_t i = 0; i < 5; i++) {
+    accepted_ids_[i] = 0;
+  }
 }
 
 WaveshareCan::~WaveshareCan() {
@@ -408,7 +419,15 @@ void WaveshareCan::RxTask() {
     esp_err_t err = twai_receive(&message, pdMS_TO_TICKS(100));
     
     if (err == ESP_OK) {
-      // Process first message
+      // ──────────────────────────────────────────────────────
+      // SOFTWARE FILTER CHECK (v2.2.0)
+      // ──────────────────────────────────────────────────────
+      if (!IsMessageAccepted(message)) {
+        // Message filtered out - continue without processing
+        continue;
+      }
+      
+      // Process first message (passed filter)
       if (rx_callback_) {
         rx_callback_(message);
       }
@@ -421,6 +440,11 @@ void WaveshareCan::RxTask() {
 
       // DRAIN: Get all remaining messages immediately (burst handling)
       while (twai_receive(&message, 0) == ESP_OK) {
+        // Apply filter to burst messages too
+        if (!IsMessageAccepted(message)) {
+          continue;  // Skip filtered messages in burst
+        }
+        
         if (rx_callback_) {
           rx_callback_(message);
         }
@@ -487,6 +511,48 @@ WaveshareCan::TaskStats WaveshareCan::GetTaskStats() const {
   }
   
   return stats;
+}
+
+// ──────────────────────────────────────────────────────────
+// Software Filter Implementation (v2.2.0)
+// ──────────────────────────────────────────────────────────
+
+void WaveshareCan::SetFilterMode(FilterMode mode) {
+  filter_mode_ = mode;
+}
+
+void WaveshareCan::SetAcceptedIds(const uint32_t* ids, uint8_t count, bool extended) {
+  if (count > 5) count = 5;  // Limit to array size
+  
+  accepted_id_count_ = count;
+  extended_filter_ = extended;
+  
+  // Copy IDs to internal array
+  for (uint8_t i = 0; i < count; i++) {
+    accepted_ids_[i] = ids[i];
+  }
+  
+  // Clear remaining slots
+  for (uint8_t i = count; i < 5; i++) {
+    accepted_ids_[i] = 0;
+  }
+}
+
+bool WaveshareCan::IsMessageAccepted(const twai_message_t& msg) const {
+  // Monitoring mode: accept all messages
+  if (filter_mode_ == kFilterMonitoring) {
+    return true;
+  }
+  
+  // Specific mode: check against accepted IDs
+  // O(n) complexity where n <= 5 (negligible performance impact)
+  for (uint8_t i = 0; i < accepted_id_count_; i++) {
+    if (msg.identifier == accepted_ids_[i]) {
+      return true;
+    }
+  }
+  
+  return false;  // Not in accepted list
 }
 
 void WaveshareCan::ResetCounters() {
