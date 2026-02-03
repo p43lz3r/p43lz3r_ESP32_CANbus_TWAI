@@ -14,5 +14,8 @@
     }
   ],
   "frameworks": "arduino",
-  "platforms": "espressif32"
+  "platforms": "espressif32",
+  "dependencies": {
+    "bblanchon/ArduinoJson": "^7.4.2"
+  }
 }
