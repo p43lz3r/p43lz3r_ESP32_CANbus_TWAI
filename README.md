@@ -2,8 +2,8 @@
 
 A CAN bus library for ESP32-S3 Waveshare boards. Built on ESP-IDF TWAI driver with FreeRTOS task management.
 
-Version: 2.2.0  
-Date: 02.02.2026  
+Version: 2.3.0  
+Date: 03.02.2026  
 Copyright: 2026 p43lz3r
 
 ## Hardware Compatibility
@@ -12,7 +12,7 @@ Tested and working:
 - ESP32-S3-Touch-LCD-4.3B (RX=GPIO16, TX=GPIO15)
 
 Expected to work (pin defaults configured):
-- ESP32-S3-Touch-LCD-7 (RX=GPIO19, TX=GPIO20)
+- ESP32-S3-Touch-LCD-7.0B (RX=GPIO19, TX=GPIO20)
 
 Custom GPIO pins supported via constructor arguments.
 
@@ -34,8 +34,14 @@ Implemented but not extensively tested:
 - Runtime configurable without bus restart
 - Two modes: Monitoring (accept all) and Specific (filter by ID)
 - Up to 5 configurable CAN IDs
-- O(n) filter check where n <= 5 (negligible CPU impact)
+- O(n) filter check where n <= 5
 - Integrates with configuration manager for persistent settings
+
+### Bitrate Configuration (v2.3.0)
+- Runtime configurable CAN bitrate via Serial interface
+- Supported: 125 kbps, 250 kbps, 500 kbps, 1000 kbps
+- Persistent storage in ESP32 NVS flash
+- Tested at 250 kbps and 500 kbps
 
 ### Production Features
 - Thread-safe FreeRTOS task management
@@ -152,15 +158,21 @@ Optional runtime configuration via Serial interface with NVS persistence.
 Upload configuration without reflashing firmware:
 
 ```bash
-# Monitor mode - accept all IDs
+# Monitor mode - accept all IDs at 500 kbps (default)
 python can_config.py --port /dev/ttyUSB0 --mode monitoring
 
-# Specific mode - filter by IDs
-python can_config.py --port /dev/ttyUSB0 --mode specific --ids 0x100 0x200 0x300
+# Specific mode with custom bitrate
+python can_config.py --port /dev/ttyUSB0 --mode specific --ids 0x100 0x200 --bitrate 250000
 
-# Extended 29-bit IDs
-python can_config.py --port /dev/ttyUSB0 --mode specific --ids 0x12345678 --extended
+# Extended 29-bit IDs at 1 Mbps
+python can_config.py --port /dev/ttyUSB0 --mode specific --ids 0x12345678 --extended --bitrate 1000000
 ```
+
+**Supported bitrates:**
+- 125000 (125 kbps) - Automotive standard
+- 250000 (250 kbps) - Industrial automation
+- 500000 (500 kbps) - Default, most common
+- 1000000 (1 Mbps) - High-speed CAN
 
 ### Integration Example
 
@@ -180,15 +192,14 @@ void setup() {
   // Wait 15 seconds for new configuration via Serial
   config.WaitForConfig(15000);
   
-  // Start CAN and apply filters
-  can.Begin(kCan500Kbps);
+  // Start CAN and apply filters (includes bitrate)
   config.ApplyToCanBus(&can);
   
   can.EnableRxInterrupt(onMessage);
 }
 ```
 
-Configuration persists across power cycles in ESP32 NVS flash.
+Configuration persists across power cycles in ESP32 NVS flash. Includes filter mode, CAN IDs, and bitrate.
 
 ## API Reference
 
@@ -198,7 +209,7 @@ Configuration persists across power cycles in ESP32 NVS flash.
 Create instance. Use -1 for default pins.
 
 **bool Begin(twai_timing_config_t speed)**  
-Initialize CAN bus. Available speeds: kCan5Kbps through kCan1000Kbps.  
+Initialize CAN bus. Available speeds: kCan125Kbps, kCan250Kbps, kCan500Kbps, kCan1000Kbps.  
 Returns false on hardware failure.
 
 **void End()**  
@@ -253,6 +264,20 @@ Configure up to 5 accepted IDs for specific mode.
 **bool Filter(uint32_t id, uint32_t mask, bool extended)**  
 Hardware acceptance filter. Requires bus restart. For runtime filtering without restart, use SetAcceptedIds().
 
+### Configuration Manager
+
+**void LoadFromNVS()**  
+Load saved configuration from flash (filter mode, IDs, bitrate).
+
+**bool WaitForConfig(uint32_t timeout_ms)**  
+Wait for JSON configuration via Serial. Returns true if config received.
+
+**void ApplyToCanBus(WaveshareCan\* can)**  
+Start CAN with configured bitrate and apply filters.
+
+**uint32_t GetBitrate()**  
+Get configured bitrate in bps.
+
 ### Monitoring
 
 **bool GetStatus(twai_status_info_t\* status)**  
@@ -293,19 +318,27 @@ Measured:
 - Per interrupt task: 8KB stack allocation
 - Queue buffer: 208 bytes (16 messages)
 - Software filter: 24 bytes (5 IDs + metadata)
-
-Note: Baseline RAM usage not measured.
+- NVS config blob: 32 bytes
 
 ### Performance
 Tested and verified:
 - Burst capacity: 50+ messages without loss at 500 kbps
 - Zero dropped messages in stress test (100 messages)
 - Software filter: O(n) where n <= 5
+- Bitrate switching: Verified at 250 kbps and 500 kbps
 
 ### Error Recovery
 - Automatic bus-off recovery via twai_initiate_recovery()
 - Stack overflow detection via uxTaskGetStackHighWaterMark()
 - Clean task shutdown with self-delete pattern
+
+### NVS Storage Format
+Configuration stored in 32-byte blob:
+- Bytes 0-1: Mode and ID count
+- Bytes 2-21: Five CAN IDs (20 bytes)
+- Byte 22: Extended flag
+- Bytes 23-26: Bitrate (uint32_t)
+- Bytes 27-31: Reserved
 
 ## Troubleshooting
 
@@ -323,6 +356,31 @@ TX error counter exceeded 255. Usually indicates physical layer issue. Library a
 
 **Configuration not persisting**  
 Verify NVS partition in ESP32 flash. Check for sufficient free space. Use config.ClearNVS() to reset if corrupted.
+
+**Bitrate mismatch**  
+Ensure all CAN nodes use same bitrate. Use config tool to set correct bitrate. Supported: 125k, 250k, 500k, 1000k bps.
+
+## Version History
+
+### v2.3.0 (03.02.2026)
+- Added runtime bitrate configuration (125k, 250k, 500k, 1000k)
+- Extended NVS blob from 28 to 32 bytes
+- ApplyToCanBus() now starts CAN with configured bitrate
+- Tested at 250 kbps and 500 kbps
+
+### v2.2.0 (02.02.2026)
+- Added software-based message filtering
+- Monitoring and Specific filter modes
+- Python configuration tool with JSON protocol
+- NVS persistence for filter configuration
+
+### v2.1.0
+- Interrupt-driven RX with 16-message queue
+- Alert interrupt handling
+- Task statistics and monitoring
+
+### v2.0.0
+- Initial release with polling and interrupt modes
 
 ## License
 
