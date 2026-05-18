@@ -5,7 +5,7 @@ A CAN bus library for ESP32-S3 Waveshare boards. Built for reliability, designed
 ## Hardware the library was successfully tested with
 
 - **ESP32-S3-Touch-LCD-4.3B** (default: RX=GPIO16, TX=GPIO15)
-- **ESP32-S3-Touch-LCD-7.0B** (default: RX=GPIO19, TX=GPIO20)
+- **ESP32-S3-Touch-LCD-7.0** (default: RX=GPIO19, TX=GPIO20)
 
 Custom pins? No problem - configure them in the constructor.
 
